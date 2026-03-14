@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Aria-Nova Ultimate",
+    "slug": "aria-nova-ultimate",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#16213E"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.arianova.ultimate"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#16213E"
+      },
+      "package": "com.arianova.ultimate"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Aria-Nova to access your photos",
+          "cameraPermission": "Allow Aria-Nova to use your camera"
+        }
+      ]
+    ]
+  }
+}

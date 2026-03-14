@@ -1,0 +1,30 @@
+{
+  "name": "@aria-nova/ui",
+  "version": "1.0.0",
+  "description": "Aria-Nova UI Components - React Native UI for Aria-Nova AI",
+  "main": "index.ts",
+  "types": "index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./screens": "./screens/index.ts",
+    "./components": "./components/index.ts"
+  },
+  "keywords": [
+    "react-native",
+    "ui-components",
+    "ai-ui",
+    "chat-ui"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "peerDependencies": {
+    "react": "^19.1.0",
+    "react-native": "0.81.2",
+    "react-native-reanimated": "~4.0.0",
+    "lottie-react-native": "^7.0.0",
+    "react-native-svg": "^15.1.0"
+  },
+  "dependencies": {
+    "@aria-nova/core": "^1.0.0"
+  }
+}
