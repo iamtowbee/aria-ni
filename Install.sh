@@ -2,7 +2,7 @@
 # ============================================================
 #  lubuntu-grub-boot/install.sh
 #  1. Wipe & partition a target disk (default: /dev/sdb)
-#  2. Download Lubuntu ISO
+#  2. Download Lubuntu IS
 #  3. Configure GRUB2 loopback boot from internal drive
 #  Supports: Arch Linux host
 #  Usage:  sudo bash install.sh [--disk /dev/sdb] [--version 24.04.1] [--isodir /boot] [--skip-format]
