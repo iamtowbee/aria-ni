@@ -4,6 +4,7 @@
 GRUB Bootloader Recovery Tool
 A Python-based tool for diagnosing and repairing GRUB bootloader issues
 with interactive and command-line argument support.
+Supports multiple disk utilities: lsblk, fdisk, parted, etc.
 """
 
 import os
@@ -12,7 +13,7 @@ import subprocess
 import argparse
 import json
 from pathlib import Path
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict, Tuple, List
 from enum import Enum
 import shutil
 
@@ -29,10 +30,16 @@ class SystemType(Enum):
     EFI = "efi"
     UNKNOWN = "unknown"
 
+class DiskUtility(Enum):
+    LSBLK = "lsblk"
+    FDISK = "fdisk"
+    PARTED = "parted"
+    BLKID = "blkid"
+
 class GrubRepair:
     """Main class for GRUB bootloader repair operations"""
     
-    def __init__(self, verbose: bool = False):
+    def __init__(self, verbose: bool = False, disk_util: str = "lsblk"):
         self.verbose = verbose
         self.mount_point = "/mnt/lubuntu"
         self.disk = None
@@ -40,6 +47,7 @@ class GrubRepair:
         self.efi_partition = None
         self.system_type = SystemType.UNKNOWN
         self.config = {}
+        self.disk_utility = disk_util
         
     def print_status(self, message: str):
         """Print green status message"""
@@ -82,9 +90,18 @@ class GrubRepair:
         """Check if script is running as root"""
         return os.geteuid() == 0
     
-    def list_disks(self) -> Dict[str, Dict]:
-        """List all available disks and their properties"""
-        self.print_info("Listing available disks...")
+    def check_available_utilities(self) -> List[str]:
+        """Check which disk utilities are available"""
+        available = []
+        for util in DiskUtility:
+            code, _, _ = self.run_command(f"which {util.value}", check=False)
+            if code == 0:
+                available.append(util.value)
+        return available
+    
+    def list_disks_lsblk(self) -> Dict[str, Dict]:
+        """List disks using lsblk"""
+        self.print_info("Listing disks using lsblk...")
         code, stdout, _ = self.run_command("lsblk -d -o NAME,SIZE,TYPE,MODEL -J", check=False)
         
         if code != 0:
@@ -106,9 +123,66 @@ class GrubRepair:
         except json.JSONDecodeError:
             return {}
     
-    def list_partitions(self, disk: str) -> Dict[str, Dict]:
-        """List all partitions on a specific disk"""
-        self.print_info(f"Listing partitions on {disk}...")
+    def list_disks_fdisk(self) -> Dict[str, Dict]:
+        """List disks using fdisk"""
+        self.print_info("Listing disks using fdisk...")
+        code, stdout, _ = self.run_command("fdisk -l 2>/dev/null | grep '^Disk /dev' | grep -v 'loop'", check=False)
+        
+        if code != 0:
+            return {}
+        
+        disks = {}
+        for line in stdout.strip().split('\n'):
+            if line:
+                parts = line.split()
+                disk_path = parts[1].rstrip(':')
+                size = ' '.join(parts[2:4]) if len(parts) > 2 else 'N/A'
+                disks[disk_path] = {
+                    'size': size,
+                    'type': 'disk',
+                    'model': 'N/A'
+                }
+        return disks
+    
+    def list_disks_parted(self) -> Dict[str, Dict]:
+        """List disks using parted"""
+        self.print_info("Listing disks using parted...")
+        code, stdout, _ = self.run_command("parted -l 2>/dev/null | grep '^Disk /dev'", check=False)
+        
+        if code != 0:
+            return {}
+        
+        disks = {}
+        for line in stdout.strip().split('\n'):
+            if line:
+                parts = line.split()
+                disk_path = parts[1].rstrip(':')
+                size = ' '.join(parts[2:4]) if len(parts) > 2 else 'N/A'
+                disks[disk_path] = {
+                    'size': size,
+                    'type': 'disk',
+                    'model': 'N/A'
+                }
+        return disks
+    
+    def list_disks(self, utility: str = None) -> Dict[str, Dict]:
+        """List all available disks using specified utility"""
+        if utility is None:
+            utility = self.disk_utility
+        
+        if utility == DiskUtility.LSBLK.value or utility == "lsblk":
+            return self.list_disks_lsblk()
+        elif utility == DiskUtility.FDISK.value or utility == "fdisk":
+            return self.list_disks_fdisk()
+        elif utility == DiskUtility.PARTED.value or utility == "parted":
+            return self.list_disks_parted()
+        else:
+            self.print_warning(f"Unknown utility: {utility}, falling back to lsblk")
+            return self.list_disks_lsblk()
+    
+    def list_partitions_lsblk(self, disk: str) -> Dict[str, Dict]:
+        """List partitions using lsblk"""
+        self.print_info(f"Listing partitions on {disk} using lsblk...")
         code, stdout, _ = self.run_command(f"lsblk {disk} -o NAME,SIZE,FSTYPE -J", check=False)
         
         if code != 0:
@@ -131,6 +205,70 @@ class GrubRepair:
             return partitions
         except json.JSONDecodeError:
             return {}
+    
+    def list_partitions_fdisk(self, disk: str) -> Dict[str, Dict]:
+        """List partitions using fdisk"""
+        self.print_info(f"Listing partitions on {disk} using fdisk...")
+        code, stdout, _ = self.run_command(f"fdisk -l {disk} 2>/dev/null | grep '^{disk}'", check=False)
+        
+        if code != 0:
+            return {}
+        
+        partitions = {}
+        for line in stdout.strip().split('\n'):
+            if line and not line.startswith('Disk'):
+                parts = line.split()
+                if len(parts) >= 1:
+                    part_path = parts[0]
+                    size = parts[1] if len(parts) > 1 else 'N/A'
+                    fstype = parts[5] if len(parts) > 5 else 'unknown'
+                    partitions[part_path] = {
+                        'size': size,
+                        'fstype': fstype
+                    }
+        return partitions
+    
+    def list_partitions_parted(self, disk: str) -> Dict[str, Dict]:
+        """List partitions using parted"""
+        self.print_info(f"Listing partitions on {disk} using parted...")
+        code, stdout, _ = self.run_command(f"parted {disk} print 2>/dev/null | grep -E '^\\s+[0-9]'", check=False)
+        
+        if code != 0:
+            return {}
+        
+        partitions = {}
+        for line in stdout.strip().split('\n'):
+            if line:
+                parts = line.split()
+                if len(parts) >= 4:
+                    part_num = parts[0]
+                    size = f"{parts[1]} {parts[2]}"
+                    fstype = parts[4] if len(parts) > 4 else 'unknown'
+                    # Reconstruct partition path
+                    if disk.startswith('/dev/nvme'):
+                        part_path = f"{disk}p{part_num}"
+                    else:
+                        part_path = f"{disk}{part_num}"
+                    partitions[part_path] = {
+                        'size': size,
+                        'fstype': fstype
+                    }
+        return partitions
+    
+    def list_partitions(self, disk: str, utility: str = None) -> Dict[str, Dict]:
+        """List all partitions on a disk using specified utility"""
+        if utility is None:
+            utility = self.disk_utility
+        
+        if utility == DiskUtility.LSBLK.value or utility == "lsblk":
+            return self.list_partitions_lsblk(disk)
+        elif utility == DiskUtility.FDISK.value or utility == "fdisk":
+            return self.list_partitions_fdisk(disk)
+        elif utility == DiskUtility.PARTED.value or utility == "parted":
+            return self.list_partitions_parted(disk)
+        else:
+            self.print_warning(f"Unknown utility: {utility}, falling back to lsblk")
+            return self.list_partitions_lsblk(disk)
     
     def auto_detect(self) -> bool:
         """Auto-detect disk and partitions"""
@@ -179,6 +317,32 @@ class GrubRepair:
     def interactive_mode(self):
         """Interactive mode for user input"""
         self.print_status("GRUB Bootloader Recovery Tool")
+        print()
+        
+        # Check available utilities
+        available_utils = self.check_available_utilities()
+        if not available_utils:
+            self.print_error("No disk utilities available (lsblk, fdisk, parted)")
+            sys.exit(1)
+        
+        # Select disk utility if multiple available
+        if len(available_utils) > 1:
+            print("\nAvailable disk utilities:")
+            for i, util in enumerate(available_utils, 1):
+                print(f"  {i}. {util}")
+            
+            choice = input("\nSelect utility to use (default: 1): ").strip()
+            try:
+                idx = int(choice) - 1 if choice else 0
+                self.disk_utility = available_utils[idx]
+            except (ValueError, IndexError):
+                self.disk_utility = available_utils[0]
+            
+            self.print_status(f"Using disk utility: {self.disk_utility}")
+        else:
+            self.disk_utility = available_utils[0]
+            self.print_status(f"Using disk utility: {self.disk_utility}")
+        
         print()
         self.print_info("Please provide disk and partition information")
         print()
@@ -243,6 +407,7 @@ class GrubRepair:
         print(f"  System Type: {self.system_type.value.upper()}")
         if self.efi_partition:
             print(f"  EFI Partition: {self.efi_partition}")
+        print(f"  Disk Utility: {self.disk_utility}")
         print()
         
         response = input("Proceed with GRUB bootloader repair? (y/n): ").strip().lower()
@@ -351,7 +516,8 @@ class GrubRepair:
             "disk": self.disk,
             "partition": self.partition,
             "efi_partition": self.efi_partition,
-            "system_type": self.system_type.value
+            "system_type": self.system_type.value,
+            "disk_utility": self.disk_utility
         }
         
         with open(config_file, 'w') as f:
@@ -374,6 +540,7 @@ class GrubRepair:
             self.partition = config.get('partition')
             self.efi_partition = config.get('efi_partition')
             self.system_type = SystemType(config.get('system_type', 'unknown'))
+            self.disk_utility = config.get('disk_utility', self.disk_utility)
             
             self.print_status(f"Configuration loaded from {config_file}")
             return True
@@ -434,8 +601,14 @@ Examples:
   # Interactive mode
   sudo python3 fix-grub-bootloader.py
 
-  # With arguments
+  # With arguments (using lsblk by default)
   sudo python3 fix-grub-bootloader.py -d /dev/sda -p /dev/sda2 -e /dev/sda1 --efi
+
+  # Using fdisk for disk detection
+  sudo python3 fix-grub-bootloader.py --disk-util fdisk
+
+  # Using parted for disk detection
+  sudo python3 fix-grub-bootloader.py --disk-util parted
 
   # Auto-detect mode
   sudo python3 fix-grub-bootloader.py --auto-detect -y
@@ -455,6 +628,8 @@ Examples:
     parser.add_argument('--efi', action='store_true', help='Enable EFI mode')
     parser.add_argument('--non-efi', action='store_true', help='Disable EFI mode')
     parser.add_argument('--auto-detect', action='store_true', help='Auto-detect disk and partitions')
+    parser.add_argument('--disk-util', choices=['lsblk', 'fdisk', 'parted'], default='lsblk', 
+                       help='Disk utility to use (default: lsblk)')
     parser.add_argument('--config', help='Load configuration from JSON file')
     parser.add_argument('--save-config', help='Save configuration to JSON file')
     parser.add_argument('-y', '--yes', action='store_true', help='Skip confirmations')
@@ -463,7 +638,7 @@ Examples:
     args = parser.parse_args()
     
     # Create repair instance
-    repair = GrubRepair(verbose=args.verbose)
+    repair = GrubRepair(verbose=args.verbose, disk_util=args.disk_util)
     
     # Load configuration from file if specified
     if args.config:
